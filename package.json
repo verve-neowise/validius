@@ -1,0 +1,15 @@
+{
+  "name": "@verve-neowise/validius",
+  "version": "1.0.001",
+  "description": "validation library",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/verve-neowise/validius.git"
+  },
+  "author": "",
+  "license": "ISC"
+}
