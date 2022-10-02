@@ -1,30 +1,9 @@
-import { number, object, string, validate } from "./validius";
+import { Criteria } from './schema'
+import { Schema } from './validius'
 
-const schema = validate(
-    object({
-        required: true,
-        entries: {
-            name: string({
-                required: true
-            }),
-            surname: string({
-                required: true,
-                value: "Hello"
-            }),
-            age: number({
-                required: true,
-                min: 5,
-                max: 16
-            })
-        }
-    })
-)
+export * from './builders'
+export * from './error'
 
-let testObject = {
-    surname: "Hello",
-    age: 3
+export const schema = (criteria: Criteria) => {
+    return new Schema(criteria)
 }
-
-let errors = schema.check(testObject)
-
-console.log(errors);

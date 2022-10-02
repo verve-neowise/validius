@@ -1,209 +1,185 @@
-import { Validation } from "./schema"
+import { Errors } from "./error"
+import {
+    ArrayCriteria, 
+    BaseCriteria, 
+    BooleanCriteria, 
+    Criteria, 
+    NumberCriteria, 
+    ObjectCriteria, 
+    StringCriteria, 
+    Type
+} from './schema'
+import { isEmail } from "./util"
 
-enum SchemaType {
-    Number,
-    Boolean,
-    String,
-    Object,
-    Array,
-    Value
-}
+type Strategy = (name: string, data: any, schema: BaseCriteria, errors: Errors) => void
 
-type BaseSchema = {
-    required?: boolean
-}
+const strategies = new Map<Type, Strategy>([
+        [ Type.Object, object],
+        [ Type.Array, array],
+        [ Type.String, string],
+        [ Type.Number, number],
+        [ Type.Boolean, boolean],
+])
 
-type ObjectSchema = {
-    entries?: {
-        [key: string] : Schema
-    }
-} & BaseSchema
+export class Schema {
 
-type ArraySchema = {
-} & BaseSchema
+    constructor(private criteria: Criteria) {}
 
-type ValueSchema = {
-    min?: number
-    max?: number
-    value?: any
-} & BaseSchema
-
-export function object(schema: ObjectSchema) : Schema {
-    return {
-        type: SchemaType.Object,
-        schema: schema
+    validate(data: any): Errors {
+        return check(data, this.criteria)
     }
 }
 
-export function string(schema: ValueSchema): Schema {
-    return {
-        type: SchemaType.String,
-        schema: schema
+function check(data: any, criteria: Criteria) {
+    let errors = new Errors()
+
+    validate("value", data, criteria, errors)
+
+    return errors
+}
+
+function validate(name: string, data: any, criteria: Criteria, errors: Errors) {
+
+    let { type, schema } = criteria
+
+    if (schema.required && !data) {
+        return errors.add(name, "is required")
+    }
+
+    if (schema.match && !schema.match.includes(data)) {
+        return errors.add(name, 'must be match of ' + schema.match)
+    }
+
+    let strategy = strategies.get(type)
+    if (strategy) {
+        return strategy(name, data, schema, errors)
+    }
+    else {
+        throw new Error(`strategy for type ${type} not implemented.`)
     }
 }
 
-export function number(schema: ValueSchema): Schema {
-    return {
-        type: SchemaType.Number,
-        schema: schema
-    }
-}
-
-export function boolean(schema: ValueSchema): Schema {
-    return {
-        type: SchemaType.Boolean,
-        schema: schema
-    }
-}
-
-
-export function array(schema: ArraySchema) : Schema {
-    return {
-        type: SchemaType.Array,
-        schema: schema
-    }
-}
-
-type Schema = {
-    type: SchemaType,
-    schema: ValueSchema | ObjectSchema | ArraySchema
-}
-
-const valueSchemas = [SchemaType.Boolean, SchemaType.Number, SchemaType.String]
-
-type ValidationError = { name: string, reason: string }
-
-class Validius {
-
-    private errors: ValidationError[] = []
-
-    constructor(
-        private schema: Schema
-    ) {}
-
-    check(data: any) {
-        let { schema } = this.schema
-
-        try {
-            if (this.checkRequired("object", data)) {
-                this.validateObject(undefined, data, schema) 
-            }
-            return this.errors
+function object(name: string, data: any, schema: ObjectCriteria, errors: Errors) {
+    if (schema.entries) {
+        for (let key in schema.entries) {
+            validate(key, data[key], schema.entries[key], errors)
         }
-        catch(error: any) {
-            this.errors.push(error)
+    }
+}
+
+function array(name: string, data: any, criteria: ArrayCriteria, errors: Errors) {
+    if (!Array.isArray(data)) {
+        return errors.add(name, "must be an array")
+    }
+
+    if (criteria.min && criteria.max) {
+        if (data.length < criteria.min || data.length > criteria.max) {
+            return errors.add(name, `length must be between of ${criteria.min}..${criteria.max}`)
         }
     }
 
-    private validate(name: string, data: any, schema: Schema) {
-
-        if (!this.checkRequired(name, data)) {
-            return
-        }
-
-        if (schema.type == SchemaType.Object) {
-           return this.validateObject(name, data, schema.schema)
-        }
-        if (schema.type == SchemaType.Array) {
-            return this.validateArray(name, data, schema.schema)
-        }
-        if (valueSchemas.includes(schema.type)) {
-            return this.validateValue(name, data, schema.type, schema.schema)
+    if (criteria.min) {
+        if (data.length < criteria.min) {
+            return errors.add(name, "must be longer of " + criteria.min)
         }
     }
 
-    private validateObject(name: string | undefined, data: any, schema: ObjectSchema) {
-        if (schema.entries) {
-            for(let key in schema.entries) {
-                this.validate(key, data[key], schema.entries[key])
-            }
+    if (criteria.max) {
+        if (data.length > criteria.max) {
+            return errors.add(name, "must be shorten of " + criteria.max)
         }
     }
-
-    private validateArray(name: string | undefined, data: any, schema: ArraySchema) {
-    }
-
     
-    private validateValue(name: string | undefined, data: any, type: SchemaType, schema: ValueSchema) {
-
-        if (type == SchemaType.Number) {
-
-            let prop = name ? name : "number" 
-
-            if (typeof data != "number") {
-                return this.errors.push({ name : prop, reason: "must be a number"})
-            }
-            
-            if (schema.value && data != schema.value) {
-                return this.errors.push({ name : prop, reason: "must be equal to " + schema.value})
-            }
-            
-            if (schema.min && schema.max) {
-                if (data < schema.min || data > schema.max) {
-                    return this.errors.push({ name : prop, reason: `must be between of ${schema.min}..${schema.max}`})
-                }
-            }
-
-            if (schema.min) {
-                if (data < schema.min) {
-                    return this.errors.push({ name : prop, reason: "must be largest of " + schema.min})
-                }
-            }
-
-            if (schema.max) {
-                if (data > schema.max) {
-                    return this.errors.push({ name : prop, reason: "must be largest of " + schema.max})
-                }
-            }
-        }
-        else if (type == SchemaType.String) {
-            let prop = name ? name : "string" 
-
-            if (typeof data != "string") {
-                return this.errors.push({ name : prop, reason: "must be a string"})
-            }
-
-            if (schema.value && data != schema.value) {
-                return this.errors.push({ name : prop, reason: "must be equal to " + schema.value})
-            }
-        }
-        else if (type == SchemaType.Boolean) {
-            let prop = name ? name : "boolean" 
-
-            if (typeof data != "boolean") {
-                return this.errors.push({ name : prop, reason: "must be a boolean"})
-            }
-            
-            if (schema.value && data != schema.value) {
-                return this.errors.push({ name : prop, reason: "must be equal to " + schema.value})
-            }
+    if (criteria.length) {
+        if (data.length > criteria.length) {
+            return errors.add(name, "length must be " + criteria.length)
         }
     }
 
-    private checkRequired(name: string | undefined, data: any): boolean {
-        if (!data) {
-            this.errors.push({ name : name ? name : "", reason: "is required" })
-            return false
-        }
-        return true
+    if (criteria.value && data != criteria.value) {
+        return errors.add(name, "must be equal to " + criteria.value)
     }
-}
 
-export function validate(schema: Schema) {
-    return new Validius(schema)
-}
+    if (criteria.isEmpty && data.length != 0) {
+        return errors.add(name, "must be empty")
+    }
 
-
-object({
-    required: true,
-    entries: {
-        name: string({
-            required: true,
-            value: "Hello App"
-        }),
-        loggedIn: boolean({
-            required: true,
-            value: false
+    if (criteria.template) {
+        data.forEach((value) => {
+            validate(name + " element", value, criteria.template!, errors)
         })
     }
-})
+}
+
+function string(prop: string, data: any, criteria: StringCriteria, errors: Errors) {
+
+    if (typeof data != "string") {
+        return errors.add(prop, "must be a string")
+    }
+    if (criteria.min && criteria.max) {
+        if (data.length < criteria.min || data.length > criteria.max) {
+            return errors.add(prop, `length must be between of ${criteria.min}..${criteria.max}`)
+        }
+    }
+
+    if (criteria.min) {
+        if (data.length < criteria.min) {
+            return errors.add(prop, "must be longer of " + criteria.min)
+        }
+    }
+
+    if (criteria.max) {
+        if (data.length > criteria.max) {
+            return errors.add(prop, "must be shorten of " + criteria.max)
+        }
+    }
+
+    if (criteria.value && data != criteria.value) {
+        return errors.add(prop, "must be equal to " + criteria.value)
+    }
+
+    if (criteria.isEmail && !isEmail(data)) {
+        return errors.add(prop, "must be an email")
+    }
+}
+
+function boolean(prop: string, data: any, schema: BooleanCriteria, errors: Errors) {
+    if (typeof data != "boolean") {
+        return errors.add(prop, "must be a boolean")
+    }
+
+    if (schema.value && data != schema.value) {
+        return errors.add(prop, "must be equal to " + schema.value)
+    }
+}
+
+function number(prop: string, data: any, criteria: NumberCriteria, errors: Errors) {
+
+    if (isNaN(data)) {
+        return errors.add(prop, "must be a number")
+    }
+
+    let value = Number(data)
+
+    if (criteria.value && value != criteria.value) {
+        return errors.add(prop, "must be equal to " + criteria.value)
+    }
+
+    if (criteria.min && criteria.max) {
+        if (value < criteria.min || value > criteria.max) {
+            return errors.add(prop, `must be between of ${criteria.min}..${criteria.max}`)
+        }
+    }
+
+    if (criteria.min) {
+        if (value < criteria.min) {
+            return errors.add(prop, "must be largest of " + criteria.min)
+        }
+    }
+
+    if (criteria.max) {
+        if (value > criteria.max) {
+            return errors.add(prop, "must be largest of " + criteria.max)
+        }
+    }
+}
